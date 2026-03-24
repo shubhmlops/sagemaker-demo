@@ -110,7 +110,7 @@ def get_pipeline(env: str, region: str):
     # Config — in a real project pull these from Secrets Manager or SSM
     role_arn  = os.environ.get("SAGEMAKER_ROLE_ARN", sagemaker.get_execution_role())
     bucket    = os.environ.get("S3_BUCKET", sagemaker.Session().default_bucket())
-    data_key  = os.environ.get("INPUT_DATA_KEY", "blend-sagemaker-demo/data/data.csv")
+    data_key  = os.environ.get("INPUT_DATA_KEY", "/data/data.csv")
     threshold = float(os.environ.get("ACCURACY_THRESHOLD", "0.80"))
 
     print(f"Env      : {env}")
