@@ -98,6 +98,16 @@ def deploy_latest_model(env: str, region: str, endpoint_name: str, role_arn: str
     exists = endpoint_exists(endpoint_name, region)
     print(f"Endpoint '{endpoint_name}' already exists: {exists}")
 
+    # Delete stale endpoint config if it exists — SageMaker keeps configs around
+    # even after an endpoint is deleted, which blocks CreateEndpointConfig on redeploy.
+    sm = boto3.client("sagemaker", region_name=region)
+    try:
+        sm.delete_endpoint_config(EndpointConfigName=endpoint_name)
+        print(f"Deleted stale endpoint config: {endpoint_name}")
+    except sm.exceptions.ClientError as e:
+        if "Could not find" not in str(e) and "does not exist" not in str(e):
+            raise
+
     # Capture 100% of requests/responses → stored in S3 for drift monitoring
     data_capture_config = DataCaptureConfig(
         enable_capture=True,
