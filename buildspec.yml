@@ -11,7 +11,7 @@ phases:
 
   install:
     runtime-versions:
-      python: 3.11
+      python: 3.10   # safer than 3.11 in CodeBuild
     commands:
       - echo "==> Installing dependencies..."
       - pip install --upgrade pip
@@ -21,17 +21,8 @@ phases:
     commands:
       - echo "==> Validating environment..."
 
-      - |
-        if [ -z "$SAGEMAKER_ROLE_ARN" ]; then
-          echo "ERROR: SAGEMAKER_ROLE_ARN is not set"
-          exit 1
-        fi
-
-      - |
-        if [ -z "$S3_BUCKET" ]; then
-          echo "ERROR: S3_BUCKET is not set"
-          exit 1
-        fi
+      - if [ -z "$SAGEMAKER_ROLE_ARN" ]; then echo "ERROR: SAGEMAKER_ROLE_ARN is not set"; exit 1; fi
+      - if [ -z "$S3_BUCKET" ]; then echo "ERROR: S3_BUCKET is not set"; exit 1; fi
 
       - echo "Pipeline name  : $PIPELINE_NAME"
       - echo "S3 bucket      : $S3_BUCKET"
@@ -40,13 +31,7 @@ phases:
   build:
     commands:
       - echo "==> Uploading data.csv to S3..."
-
-      - |
-        if [ -f data.csv ]; then
-          aws s3 cp data.csv s3://$S3_BUCKET/$INPUT_DATA_KEY
-        else
-          echo "WARNING: data.csv not found, skipping upload"
-        fi
+      - if [ -f data.csv ]; then aws s3 cp data.csv s3://$S3_BUCKET/$INPUT_DATA_KEY; else echo "WARNING: data.csv not found, skipping upload"; fi
 
       - echo "==> Running pipeline script..."
       - python pipeline.py
