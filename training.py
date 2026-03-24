@@ -68,6 +68,15 @@ model_path = os.path.join(MODEL_DIR, "model.joblib")
 joblib.dump(model, model_path)
 print(f"Model saved → {model_path}  ✓")
 
+# Copy this script into model/code/ so the serving container can find it.
+# SageMaker tars everything under /opt/ml/model/ into model.tar.gz —
+# without this, SAGEMAKER_PROGRAM=training.py has nothing to import.
+import shutil
+code_dir = os.path.join(MODEL_DIR, "code")
+os.makedirs(code_dir, exist_ok=True)
+shutil.copy(__file__, os.path.join(code_dir, "training.py"))
+print(f"Inference script copied → {code_dir}/training.py  ✓")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Inference handlers  (used by SageMaker when this script is the serving entry point)
