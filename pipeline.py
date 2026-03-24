@@ -71,13 +71,13 @@ step_preprocess = ProcessingStep(
         ProcessingOutput(output_name="validation", source="/opt/ml/processing/output/validation"),
         ProcessingOutput(output_name="test", source="/opt/ml/processing/output/test"),
     ],
-    code="1_preprocessing.py",
+    code="preprocessing.py",
 )
 
 
 # ── Step 2: Train ──────────────────────────────────────
 estimator = SKLearn(
-    entry_point="2_training.py",
+    entry_point="training.py",
     framework_version="1.2-1",
     instance_type="ml.m5.xlarge",
     role=role,
@@ -130,7 +130,7 @@ step_evaluate = ProcessingStep(
     outputs=[
         ProcessingOutput(output_name="evaluation", source="/opt/ml/processing/evaluation")
     ],
-    code="3_evaluation.py",
+    code="evaluation.py",
     property_files=[evaluation_report],
 )
 
