@@ -11,18 +11,18 @@ phases:
 
   install:
     runtime-versions:
-      python: 3.10   # safer than 3.11 in CodeBuild
+      python: 3.10
     commands:
       - echo "==> Installing dependencies..."
       - pip install --upgrade pip
-      - pip install awscli sagemaker==2.224.0 scikit-learn==1.2.2 boto3 pandas
+      - pip install --no-cache-dir awscli sagemaker==2.224.0 scikit-learn==1.2.2 boto3 pandas
 
   pre_build:
     commands:
       - echo "==> Validating environment..."
 
-      - if [ -z "$SAGEMAKER_ROLE_ARN" ]; then echo "ERROR: SAGEMAKER_ROLE_ARN is not set"; exit 1; fi
-      - if [ -z "$S3_BUCKET" ]; then echo "ERROR: S3_BUCKET is not set"; exit 1; fi
+      - '[ -z "$SAGEMAKER_ROLE_ARN" ] && echo "ERROR: SAGEMAKER_ROLE_ARN is not set" && exit 1 || true'
+      - '[ -z "$S3_BUCKET" ] && echo "ERROR: S3_BUCKET is not set" && exit 1 || true'
 
       - echo "Pipeline name  : $PIPELINE_NAME"
       - echo "S3 bucket      : $S3_BUCKET"
@@ -31,7 +31,7 @@ phases:
   build:
     commands:
       - echo "==> Uploading data.csv to S3..."
-      - if [ -f data.csv ]; then aws s3 cp data.csv s3://$S3_BUCKET/$INPUT_DATA_KEY; else echo "WARNING: data.csv not found, skipping upload"; fi
+      - '[ -f data.csv ] && aws s3 cp data.csv s3://$S3_BUCKET/$INPUT_DATA_KEY || echo "WARNING: data.csv not found, skipping upload"'
 
       - echo "==> Running pipeline script..."
       - python pipeline.py
