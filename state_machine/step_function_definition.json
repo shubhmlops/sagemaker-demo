@@ -1,0 +1,356 @@
+{
+  "Comment": "SageMaker Training and Endpoint Deployment Pipeline",
+  "StartAt": "PreprocessingJob",
+  "States": {
+
+    "PreprocessingJob": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:createProcessingJob.sync",
+      "Parameters": {
+        "ProcessingJobName.$": "States.Format('preprocessing-{}', $$.Execution.Name)",
+        "ProcessingResources": {
+          "ClusterConfig": {
+            "InstanceCount": 1,
+            "InstanceType": "ml.m5.xlarge",
+            "VolumeSizeInGB": 30
+          }
+        },
+        "AppSpecification": {
+          "ImageUri": "your-account-id.dkr.ecr.us-east-1.amazonaws.com/your-preprocessing-image:latest",
+          "ContainerEntrypoint": ["python3", "/opt/ml/processing/code/preprocess.py"]
+        },
+        "ProcessingInputs": [
+          {
+            "InputName": "raw-data",
+            "S3Input": {
+              "S3Uri": "s3://your-bucket/raw-data/",
+              "LocalPath": "/opt/ml/processing/input",
+              "S3DataType": "S3Prefix",
+              "S3InputMode": "File"
+            }
+          }
+        ],
+        "ProcessingOutputs": [
+          {
+            "OutputName": "train",
+            "S3Output": {
+              "S3Uri": "s3://your-bucket/processed/train/",
+              "LocalPath": "/opt/ml/processing/output/train",
+              "S3UploadMode": "EndOfJob"
+            }
+          },
+          {
+            "OutputName": "validation",
+            "S3Output": {
+              "S3Uri": "s3://your-bucket/processed/validation/",
+              "LocalPath": "/opt/ml/processing/output/validation",
+              "S3UploadMode": "EndOfJob"
+            }
+          }
+        ],
+        "RoleArn": "arn:aws:iam::your-account-id:role/SageMakerExecutionRole"
+      },
+      "Next": "TrainingJob",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "TrainingJob": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:createTrainingJob.sync",
+      "Parameters": {
+        "TrainingJobName.$": "States.Format('training-{}', $$.Execution.Name)",
+        "AlgorithmSpecification": {
+          "TrainingImage": "683313688378.dkr.ecr.us-east-1.amazonaws.com/xgboost:1.5-1",
+          "TrainingInputMode": "File"
+        },
+        "HyperParameters": {
+          "max_depth": "5",
+          "eta": "0.2",
+          "gamma": "4",
+          "min_child_weight": "6",
+          "subsample": "0.8",
+          "objective": "binary:logistic",
+          "num_round": "100",
+          "eval_metric": "auc"
+        },
+        "InputDataConfig": [
+          {
+            "ChannelName": "train",
+            "DataSource": {
+              "S3DataSource": {
+                "S3DataType": "S3Prefix",
+                "S3Uri": "s3://your-bucket/processed/train/",
+                "S3DataDistributionType": "FullyReplicated"
+              }
+            },
+            "ContentType": "text/csv"
+          },
+          {
+            "ChannelName": "validation",
+            "DataSource": {
+              "S3DataSource": {
+                "S3DataType": "S3Prefix",
+                "S3Uri": "s3://your-bucket/processed/validation/",
+                "S3DataDistributionType": "FullyReplicated"
+              }
+            },
+            "ContentType": "text/csv"
+          }
+        ],
+        "OutputDataConfig": {
+          "S3OutputPath": "s3://your-bucket/model-artifacts/"
+        },
+        "ResourceConfig": {
+          "InstanceType": "ml.m5.xlarge",
+          "InstanceCount": 1,
+          "VolumeSizeInGB": 30
+        },
+        "StoppingCondition": {
+          "MaxRuntimeInSeconds": 3600
+        },
+        "RoleArn": "arn:aws:iam::your-account-id:role/SageMakerExecutionRole"
+      },
+      "ResultPath": "$.TrainingResult",
+      "Next": "EvaluateModelAccuracy",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "EvaluateModelAccuracy": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:your-account-id:function:evaluate-model-metrics",
+        "Payload": {
+          "training_job_name.$": "$.TrainingResult.TrainingJobName",
+          "metric_name": "validation:auc",
+          "threshold": 0.75
+        }
+      },
+      "ResultPath": "$.EvaluationResult",
+      "Next": "CheckAccuracyThreshold",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "CheckAccuracyThreshold": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.EvaluationResult.Payload.meets_threshold",
+          "BooleanEquals": true,
+          "Next": "CreateModel"
+        }
+      ],
+      "Default": "ModelAccuracyInsufficient"
+    },
+
+    "ModelAccuracyInsufficient": {
+      "Type": "Fail",
+      "Error": "ModelAccuracyBelowThreshold",
+      "Cause": "Model did not meet the minimum accuracy threshold. Aborting deployment."
+    },
+
+    "CreateModel": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:createModel",
+      "Parameters": {
+        "ModelName.$": "States.Format('model-{}', $$.Execution.Name)",
+        "PrimaryContainer": {
+          "Image": "683313688378.dkr.ecr.us-east-1.amazonaws.com/xgboost:1.5-1",
+          "ModelDataUrl.$": "$.TrainingResult.ModelArtifacts.S3ModelArtifacts",
+          "Environment": {
+            "SAGEMAKER_CONTAINER_LOG_LEVEL": "20",
+            "SAGEMAKER_PROGRAM": "inference.py",
+            "SAGEMAKER_REGION": "us-east-1",
+            "SAGEMAKER_SUBMIT_DIRECTORY": "s3://your-bucket/code/sourcedir.tar.gz"
+          }
+        },
+        "ExecutionRoleArn": "arn:aws:iam::your-account-id:role/SageMakerExecutionRole"
+      },
+      "ResultPath": "$.CreateModelResult",
+      "Next": "CreateEndpointConfig",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "CreateEndpointConfig": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:createEndpointConfig",
+      "Parameters": {
+        "EndpointConfigName.$": "States.Format('endpoint-config-{}', $$.Execution.Name)",
+        "ProductionVariants": [
+          {
+            "VariantName": "AllTraffic",
+            "ModelName.$": "States.Format('model-{}', $$.Execution.Name)",
+            "InstanceType": "ml.m5.large",
+            "InitialInstanceCount": 1,
+            "InitialVariantWeight": 1
+          }
+        ],
+        "DataCaptureConfig": {
+          "EnableCapture": true,
+          "InitialSamplingPercentage": 100,
+          "DestinationS3Uri": "s3://your-bucket/data-capture/",
+          "CaptureOptions": [
+            { "CaptureMode": "Input" },
+            { "CaptureMode": "Output" }
+          ]
+        }
+      },
+      "ResultPath": "$.EndpointConfigResult",
+      "Next": "CheckEndpointExists",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "CheckEndpointExists": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:your-account-id:function:check-endpoint-exists",
+        "Payload": {
+          "endpoint_name": "my-production-endpoint"
+        }
+      },
+      "ResultPath": "$.EndpointExistsResult",
+      "Next": "EndpointExistsChoice",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "EndpointExistsChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.EndpointExistsResult.Payload.exists",
+          "BooleanEquals": true,
+          "Next": "UpdateEndpoint"
+        }
+      ],
+      "Default": "CreateEndpoint"
+    },
+
+    "CreateEndpoint": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:createEndpoint.sync",
+      "Parameters": {
+        "EndpointName": "my-production-endpoint",
+        "EndpointConfigName.$": "States.Format('endpoint-config-{}', $$.Execution.Name)"
+      },
+      "ResultPath": "$.EndpointResult",
+      "Next": "RegisterModelInRegistry",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "UpdateEndpoint": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:updateEndpoint.sync",
+      "Parameters": {
+        "EndpointName": "my-production-endpoint",
+        "EndpointConfigName.$": "States.Format('endpoint-config-{}', $$.Execution.Name)"
+      },
+      "ResultPath": "$.EndpointResult",
+      "Next": "RegisterModelInRegistry",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "RegisterModelInRegistry": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:your-account-id:function:register-model",
+        "Payload": {
+          "model_name.$": "States.Format('model-{}', $$.Execution.Name)",
+          "training_job_name.$": "$.TrainingResult.TrainingJobName",
+          "model_package_group": "my-model-package-group",
+          "accuracy.$": "$.EvaluationResult.Payload.accuracy"
+        }
+      },
+      "ResultPath": "$.RegistrationResult",
+      "Next": "NotifySuccess",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:your-account-id:ml-pipeline-notifications",
+        "Message.$": "States.Format('✅ ML Pipeline SUCCESS. Endpoint: my-production-endpoint | Model: {} | Accuracy: {}', $.TrainingResult.TrainingJobName, $.EvaluationResult.Payload.accuracy)",
+        "Subject": "ML Pipeline - Deployment Successful"
+      },
+      "Next": "PipelineSucceeded"
+    },
+
+    "PipelineSucceeded": {
+      "Type": "Succeed"
+    },
+
+    "PipelineFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:your-account-id:ml-pipeline-notifications",
+        "Message.$": "States.Format('❌ ML Pipeline FAILED. Error: {}', $.error)",
+        "Subject": "ML Pipeline - Deployment Failed"
+      },
+      "Next": "Fail"
+    },
+
+    "Fail": {
+      "Type": "Fail",
+      "Error": "PipelineFailed",
+      "Cause": "ML pipeline encountered an error. Check SNS notification for details."
+    }
+  }
+}
