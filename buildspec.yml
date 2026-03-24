@@ -1,249 +1,60 @@
-# buildspec.yml
-# -------------
-# AWS CodeBuild specification file
-#
-# This runs as part of an AWS CodePipeline to:
-#   1. Install dependencies
-#   2. Upload data.csv to S3
-#   3. Create/update the SageMaker Pipeline definition
-#   4. Trigger a pipeline execution
-#
-# Required CodeBuild Environment Variables (set in CodeBuild project or CodePipeline):
-#   SAGEMAKER_ROLE_ARN   → IAM role ARN that SageMaker will assume
-#   S3_BUCKET            → S3 bucket name for data and artifacts
-#   AWS_DEFAULT_REGION   → e.g. us-east-1
-#
-# Optional:
-#   PIPELINE_NAME        → defaults to "MyMLPipeline"
-#   INPUT_DATA_KEY       → S3 key for data.csv, defaults to sm-pipeline-demo/data/data.csv
-#   ACCURACY_THRESHOLD   → F1 threshold to register model, defaults to 0.80
-
 version: 0.2
 
 env:
   variables:
     PIPELINE_NAME: "MyMLPipeline"
-    INPUT_DATA_KEY: "sm-pipeline-demo/data/data.csv"
+    INPUT_DATA_KEY: "blend-sagemaker-demo/data/data.csv"
     ACCURACY_THRESHOLD: "0.80"
     MODEL_APPROVAL_STATUS: "PendingManualApproval"
 
 phases:
 
-  # ── Install phase: runs once, sets up the environment ───────────────────────
   install:
     runtime-versions:
       python: 3.11
     commands:
       - echo "==> Installing dependencies..."
       - pip install --upgrade pip
-      - pip install sagemaker scikit-learn boto3 pandas
+      - pip install awscli sagemaker==2.224.0 scikit-learn==1.2.2 boto3 pandas
 
-  # ── Pre-build: validate environment variables are set ───────────────────────
   pre_build:
     commands:
       - echo "==> Validating environment..."
 
-      # Fail early if required variables are missing
       - |
         if [ -z "$SAGEMAKER_ROLE_ARN" ]; then
           echo "ERROR: SAGEMAKER_ROLE_ARN is not set"
           exit 1
         fi
+
       - |
         if [ -z "$S3_BUCKET" ]; then
           echo "ERROR: S3_BUCKET is not set"
           exit 1
         fi
 
-      - echo "  Pipeline name  : $PIPELINE_NAME"
-      - echo "  S3 bucket      : $S3_BUCKET"
-      - echo "  SageMaker role : $SAGEMAKER_ROLE_ARN"
-      - echo "  Region         : $AWS_DEFAULT_REGION"
-      - echo "  F1 threshold   : $ACCURACY_THRESHOLD"
+      - echo "Pipeline name  : $PIPELINE_NAME"
+      - echo "S3 bucket      : $S3_BUCKET"
+      - echo "Region         : $AWS_DEFAULT_REGION"
 
-  # ── Build: upload data, upsert pipeline, start execution ────────────────────
   build:
     commands:
-      # 1. Upload data.csv to S3 (skip if already there — || true prevents failure)
       - echo "==> Uploading data.csv to S3..."
-      - aws s3 cp data.csv s3://$S3_BUCKET/$INPUT_DATA_KEY || true
-      - echo "  Uploaded → s3://$S3_BUCKET/$INPUT_DATA_KEY"
 
-      # 2. Upsert the SageMaker Pipeline definition and start execution
-      #    We pass all config as env vars so 4_pipeline.py stays generic
-      - echo "==> Upserting SageMaker Pipeline..."
       - |
-        python3 - <<'EOF'
-        import os
-        import boto3
-        import sagemaker
-        from sagemaker.workflow.pipeline import Pipeline
-        from sagemaker.workflow.steps import ProcessingStep, TrainingStep
-        from sagemaker.sklearn.processing import SKLearnProcessor
-        from sagemaker.sklearn.estimator import SKLearn
-        from sagemaker.processing import ProcessingInput, ProcessingOutput
-        from sagemaker.workflow.parameters import ParameterString, ParameterFloat
-        from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
-        from sagemaker.workflow.condition_step import ConditionStep
-        from sagemaker.workflow.functions import JsonGet
-        from sagemaker.workflow.properties import PropertyFile
-        from sagemaker.model_metrics import MetricsSource, ModelMetrics
-        from sagemaker.workflow.step_collections import RegisterModel
-        import sagemaker.inputs
+        if [ -f data.csv ]; then
+          aws s3 cp data.csv s3://$S3_BUCKET/$INPUT_DATA_KEY
+        else
+          echo "WARNING: data.csv not found, skipping upload"
+        fi
 
-        # ── Config from environment ──────────────────────────────────────────
-        role          = os.environ["SAGEMAKER_ROLE_ARN"]
-        bucket        = os.environ["S3_BUCKET"]
-        region        = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-        pipeline_name = os.environ.get("PIPELINE_NAME", "MyMLPipeline")
-        data_key      = os.environ.get("INPUT_DATA_KEY", "sm-pipeline-demo/data/data.csv")
-        threshold     = float(os.environ.get("ACCURACY_THRESHOLD", "0.80"))
-        approval      = os.environ.get("MODEL_APPROVAL_STATUS", "PendingManualApproval")
+      - echo "==> Running pipeline script..."
+      - python pipeline.py
 
-        session = sagemaker.Session(boto_session=boto3.Session(region_name=region))
-
-        # ── Pipeline parameters ──────────────────────────────────────────────
-        input_data_uri = ParameterString(
-            name="InputDataUri",
-            default_value=f"s3://{bucket}/{data_key}",
-        )
-        model_approval_status = ParameterString(
-            name="ModelApprovalStatus",
-            default_value=approval,
-        )
-        accuracy_threshold = ParameterFloat(
-            name="AccuracyThreshold",
-            default_value=threshold,
-        )
-
-        # ── Step 1: Preprocess ───────────────────────────────────────────────
-        preprocessor = SKLearnProcessor(
-            framework_version="1.2-1",
-            instance_type="ml.m5.large",
-            instance_count=1,
-            role=role,
-            sagemaker_session=session,
-        )
-        step_preprocess = ProcessingStep(
-            name="PreprocessData",
-            processor=preprocessor,
-            inputs=[ProcessingInput(source=input_data_uri, destination="/opt/ml/processing/input")],
-            outputs=[
-                ProcessingOutput(output_name="train",      source="/opt/ml/processing/output/train"),
-                ProcessingOutput(output_name="validation", source="/opt/ml/processing/output/validation"),
-                ProcessingOutput(output_name="test",       source="/opt/ml/processing/output/test"),
-            ],
-            code="1_preprocessing.py",
-        )
-
-        # ── Step 2: Train ────────────────────────────────────────────────────
-        estimator = SKLearn(
-            entry_point="2_training.py",
-            framework_version="1.2-1",
-            instance_type="ml.m5.xlarge",
-            role=role,
-            sagemaker_session=session,
-            hyperparameters={"n_estimators": 100, "max_depth": 5},
-        )
-        step_train = TrainingStep(
-            name="TrainModel",
-            estimator=estimator,
-            inputs={
-                "train":      sagemaker.inputs.TrainingInput(
-                    step_preprocess.properties.ProcessingOutputConfig.Outputs["train"].S3Output.S3Uri
-                ),
-                "validation": sagemaker.inputs.TrainingInput(
-                    step_preprocess.properties.ProcessingOutputConfig.Outputs["validation"].S3Output.S3Uri
-                ),
-            },
-        )
-
-        # ── Step 3: Evaluate ─────────────────────────────────────────────────
-        evaluator = SKLearnProcessor(
-            framework_version="1.2-1",
-            instance_type="ml.m5.large",
-            instance_count=1,
-            role=role,
-            sagemaker_session=session,
-        )
-        eval_report = PropertyFile(
-            name="EvaluationReport",
-            output_name="evaluation",
-            path="evaluation.json",
-        )
-        step_evaluate = ProcessingStep(
-            name="EvaluateModel",
-            processor=evaluator,
-            inputs=[
-                ProcessingInput(
-                    source=step_train.properties.ModelArtifacts.S3ModelArtifacts,
-                    destination="/opt/ml/processing/model",
-                ),
-                ProcessingInput(
-                    source=step_preprocess.properties.ProcessingOutputConfig.Outputs["test"].S3Output.S3Uri,
-                    destination="/opt/ml/processing/test",
-                ),
-            ],
-            outputs=[ProcessingOutput(output_name="evaluation", source="/opt/ml/processing/evaluation")],
-            code="3_evaluation.py",
-            property_files=[eval_report],
-        )
-
-        # ── Step 4: Condition + Register ─────────────────────────────────────
-        model_metrics = ModelMetrics(
-            model_statistics=MetricsSource(
-                s3_uri="{}/evaluation.json".format(
-                    step_evaluate.arguments["ProcessingOutputConfig"]["Outputs"][0]["S3Output"]["S3Uri"]
-                ),
-                content_type="application/json",
-            )
-        )
-        step_register = RegisterModel(
-            name="RegisterModel",
-            estimator=estimator,
-            model_data=step_train.properties.ModelArtifacts.S3ModelArtifacts,
-            content_types=["text/csv"],
-            response_types=["text/csv"],
-            approval_status=model_approval_status,
-            model_metrics=model_metrics,
-        )
-        condition = ConditionGreaterThanOrEqualTo(
-            left=JsonGet(
-                step_name=step_evaluate.name,
-                property_file="EvaluationReport",
-                json_path="metrics.f1",
-            ),
-            right=accuracy_threshold,
-        )
-        step_condition = ConditionStep(
-            name="CheckModelF1",
-            conditions=[condition],
-            if_steps=[step_register],
-            else_steps=[],
-        )
-
-        # ── Upsert pipeline ──────────────────────────────────────────────────
-        pipeline = Pipeline(
-            name=pipeline_name,
-            parameters=[input_data_uri, model_approval_status, accuracy_threshold],
-            steps=[step_preprocess, step_train, step_evaluate, step_condition],
-            sagemaker_session=session,
-        )
-        pipeline.upsert(role_arn=role)
-        print(f"Pipeline '{pipeline_name}' upserted successfully ✓")
-
-        # ── Start execution ──────────────────────────────────────────────────
-        execution = pipeline.start()
-        print(f"Execution ARN: {execution.arn}")
-        EOF
-
-  # ── Post-build: print summary ────────────────────────────────────────────────
   post_build:
     commands:
       - echo "==> Build complete ✓"
-      - echo "  Monitor pipeline in SageMaker Studio → Pipelines → $PIPELINE_NAME"
 
-# Artifacts: pass the source scripts through so CodePipeline stages can use them
 artifacts:
   files:
     - "**/*"
