@@ -1,0 +1,59 @@
+FROM public.ecr.aws/sagemaker/sagemaker-distribution:latest-cpu
+
+USER root
+
+# Install dependencies for building Python from source
+RUN apt-get update && apt-get install -y \
+    wget \
+    build-essential \
+    libssl-dev \
+    zlib1g-dev \
+    libncurses5-dev \
+    libncursesw5-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libgdbm-dev \
+    libdb5.3-dev \
+    libbz2-dev \
+    libexpat1-dev \
+    liblzma-dev \
+    tk-dev \
+    libffi-dev \
+    vim \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install Python 3.13
+WORKDIR /usr/src
+RUN wget https://www.python.org/ftp/python/3.13.0/Python-3.13.0.tgz && \
+    tar xzf Python-3.13.0.tgz && \
+    cd Python-3.13.0 && \
+    ./configure --enable-optimizations && \
+    make -j$(nproc) && \
+    make altinstall && \
+    cd .. && \
+    rm -rf Python-3.13.0 Python-3.13.0.tgz
+
+# Verify python3.13 installation
+RUN python3.13 --version
+
+# Install SageMaker Training Toolkit FIRST (provides /usr/local/bin/train)
+RUN pip install sagemaker-training
+
+# ✅ Ensure SageMaker SDK and dependencies are up to date inside your venv
+RUN pip install --upgrade sagemaker boto3 botocore
+
+# Install PyTorch and other requirements
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Set environment
+ENV PYTHONUNBUFFERED=TRUE
+ENV PYTHONDONTWRITEBYTECODE=TRUE
+
+# Set virtualenv path
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+#ENTRYPOINT ["python3.13"]
+ENV SAGEMAKER_PROGRAM=""

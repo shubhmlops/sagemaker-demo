@@ -1,0 +1,21 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.13
+    commands:
+      - pip install --upgrade pip
+      - pip install --upgrade 'sagemaker<3' boto3 botocore numpy pandas
+      - pip install snowflake-connector-python
+      - pip install -r modelling/requirements.txt
+
+  build:
+    commands:
+      - echo "Starting SageMaker pipeline..."
+      - ls -R modelling/
+      - python3 modelling/pipeline.py
+
+artifacts:
+  files:
+    - '**/*'

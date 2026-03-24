@@ -1,12 +1,5 @@
 version: 0.2
 
-# env:
-#   variables:
-#     PIPELINE_NAME: "MyMLPipeline"
-#     #INPUT_DATA_KEY: "blend-sagemaker-demo/data/data.csv"
-#     ACCURACY_THRESHOLD: "0.80"
-#     MODEL_APPROVAL_STATUS: "PendingManualApproval"
-
 phases:
 
   install:
@@ -16,20 +9,19 @@ phases:
       - echo "==> Installing dependencies..."
       - pip install --upgrade pip
       - pip install --no-cache-dir awscli sagemaker==2.224.0 scikit-learn==1.2.2 boto3 pandas
-
-  # pre_build:
-  #   commands:
-  #     - echo "==> Validating environment..."
-
-  #     - '[ -z "$SAGEMAKER_ROLE_ARN" ] && echo "ERROR: SAGEMAKER_ROLE_ARN is not set" && exit 1 || true'
-  #     - '[ -z "$S3_BUCKET" ] && echo "ERROR: S3_BUCKET is not set" && exit 1 || true'
-
-  #     - echo "Pipeline name  : $PIPELINE_NAME"
-  #     - echo "S3 bucket      : $S3_BUCKET"
-  #     - echo "Region         : $AWS_DEFAULT_REGION"
+      # - pip install snowflake-connector-python
+      # - pip install -r requirements.txt
 
   build:
     commands:
+      # - |
+      #   if [ -f "data.csv" ]; then
+      #     echo "==> data.csv found, uploading to S3..."
+      #     aws s3 cp data.csv s3://${S3_BUCKET}/${INPUT_DATA_KEY:-data/data.csv}
+      #     echo "==> Upload complete."
+      #   else
+      #     echo "==> data.csv not found, skipping upload."
+      #   fi
       - echo "Starting SageMaker pipeline..."
       - python pipeline.py
 

@@ -1,0 +1,27 @@
+EXECUTE IMMEDIATE $$
+DECLARE
+    var TIMESTAMP;
+BEGIN
+    var := CURRENT_TIMESTAMP();
+
+    SELECT :var;
+    -- Main TRX section
+    CREATE OR REPLACE TEMPORARY TABLE tmp_unpivoted_features AS
+
+    -- Insert market names into LOOKUP_MARKET
+    INSERT INTO {{SCENARIOS_SCHEMA}}.LOOKUP_MARKET (NAME, DATECREATED, DATEUPDATED)
+
+    -- Insert into FEATURES_MASTER_TABLE
+    INSERT INTO {{FORECASTING_SCHEMA}}.FEATURES (
+        FEATURE_NAME,
+        SOURCE,
+        DRUG_ID,
+        INDICATOR,
+        AREA_ID,
+        IS_ACTIVE,
+        DATECREATED,
+        DATEUPDATED
+    )
+
+END; 
+$$;

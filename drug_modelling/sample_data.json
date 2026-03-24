@@ -1,0 +1,16 @@
+{
+  "instances": [
+    {
+      "price": 8100,
+      "promo_flag": 0,
+      "month": 1,
+      "year": 2025,
+      "lag_1": 1689,
+      "lag_3": 1650,
+      "lag_6": 1580,
+      "lag_12": 1490,
+      "rolling_3": 1660,
+      "rolling_6": 1615
+    }
+  ]
+}
