@@ -9,7 +9,10 @@ Pipeline steps (run sequentially via depends_on):
   3. EvaluateModel   → evaluation.py      (SKLearn ProcessingStep)
   4. RegisterModel   → SageMaker Model Registry (if F1 ≥ threshold)
 
-After pipeline succeeds → deploys the latest approved model to an endpoint.
+After pipeline succeeds:
+  → Deploys the latest approved model to an endpoint (with data capture ON)
+  → Runs a baseline job on training data to learn "normal" feature distributions
+  → Creates an hourly monitoring schedule to detect data drift
 
 Usage:
     ENV=dev python3 pipeline.py
@@ -35,6 +38,8 @@ from sagemaker.sklearn.processing import SKLearnProcessor
 from sagemaker.sklearn.estimator import SKLearn
 from sagemaker.processing import ProcessingInput, ProcessingOutput
 from sagemaker.model_metrics import MetricsSource, ModelMetrics
+from sagemaker.model_monitor import DefaultModelMonitor, DataCaptureConfig
+from sagemaker.model_monitor.dataset_format import DatasetFormat
 import sagemaker.inputs
 
 # ── Base directory (all scripts live next to this file) ───────────────────────
@@ -73,8 +78,12 @@ def get_latest_approved_model_package(model_group: str, region: str) -> str:
 
 
 def deploy_latest_model(env: str, region: str, endpoint_name: str, role_arn: str,
-                         model_group: str = "AbaloneModelPackageGroup"):
-    """Deploy (or update) the latest approved model to a real-time endpoint."""
+                         bucket: str, model_group: str = "AbaloneModelPackageGroup"):
+    """Deploy (or update) the latest approved model to a real-time endpoint.
+
+    Data capture is enabled so all inference inputs/outputs are saved to S3.
+    These captured requests feed the model monitoring schedule.
+    """
     session = Session(boto3.Session(region_name=region))
     model_package_arn = get_latest_approved_model_package(model_group, region)
 
@@ -89,13 +98,79 @@ def deploy_latest_model(env: str, region: str, endpoint_name: str, role_arn: str
     exists = endpoint_exists(endpoint_name, region)
     print(f"Endpoint '{endpoint_name}' already exists: {exists}")
 
+    # Capture 100% of requests/responses → stored in S3 for drift monitoring
+    data_capture_config = DataCaptureConfig(
+        enable_capture=True,
+        sampling_percentage=100,
+        destination_s3_uri=f"s3://{bucket}/monitoring/data-capture/{endpoint_name}",
+    )
+
     model.deploy(
         endpoint_name=endpoint_name,
         instance_type="ml.m5.large",
         initial_instance_count=1,
-        update_endpoint=exists,   # update in-place if endpoint exists
+        update_endpoint=exists,
+        data_capture_config=data_capture_config,
     )
     print(f"✅ Endpoint ready: {endpoint_name}")
+
+
+def setup_model_monitoring(env: str, region: str, endpoint_name: str, role_arn: str,
+                            bucket: str, baseline_data_uri: str):
+    """Set up SageMaker Model Monitor on the deployed endpoint.
+
+    Steps:
+      1. Run a baseline job — analyses the training data to learn expected
+         feature distributions (mean, std, min/max, nulls etc.)
+      2. Create an hourly monitoring schedule — compares live captured traffic
+         against that baseline and flags violations in CloudWatch.
+    """
+    session = Session(boto3.Session(region_name=region))
+
+    monitor = DefaultModelMonitor(
+        role=role_arn,
+        instance_count=1,
+        instance_type="ml.m5.xlarge",
+        volume_size_in_gb=20,
+        max_runtime_in_seconds=3600,
+        sagemaker_session=session,
+    )
+
+    baseline_results_uri = f"s3://{bucket}/monitoring/baseline/{env}/"
+
+    # Step 1 — Baseline: learn what "normal" looks like from training data
+    print("Running baseline job — this analyses training data distributions...")
+    monitor.suggest_baseline(
+        baseline_dataset=baseline_data_uri,
+        dataset_format=DatasetFormat.csv(header=True),
+        output_s3_uri=baseline_results_uri,
+        wait=True,
+        logs=False,
+    )
+    print(f"✅ Baseline complete. Results at: {baseline_results_uri}")
+
+    # Step 2 — Monitoring schedule: hourly drift check against the baseline
+    schedule_name = f"abalone-data-monitor-{env}"
+
+    # Delete existing schedule first so we always get a fresh one with the new baseline
+    sm = boto3.client("sagemaker", region_name=region)
+    try:
+        sm.delete_monitoring_schedule(MonitoringScheduleName=schedule_name)
+        print(f"Deleted existing monitoring schedule: {schedule_name}")
+        time.sleep(10)  # wait for deletion to propagate
+    except sm.exceptions.ResourceNotFound:
+        pass
+
+    monitor.create_monitoring_schedule(
+        monitor_schedule_name=schedule_name,
+        endpoint_input=endpoint_name,
+        output_s3_uri=f"s3://{bucket}/monitoring/reports/{env}/",
+        statistics=monitor.baseline_statistics(),
+        constraints=monitor.suggested_constraints(),
+        schedule_cron_expression="cron(0 * ? * * *)",   # every hour
+    )
+    print(f"✅ Monitoring schedule active: {schedule_name} (runs hourly)")
+    print("   Violations will appear in CloudWatch under /aws/sagemaker/Endpoints")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -274,8 +349,12 @@ def get_pipeline(env: str, region: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    ENV    = os.getenv("ENV", "dev")       # dev | uat | prod
-    REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    ENV      = os.getenv("ENV", "dev")
+    REGION   = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    BUCKET   = os.getenv("S3_BUCKET", sagemaker.Session().default_bucket())
+    DATA_KEY = os.getenv("INPUT_DATA_KEY", "data/data.csv")
+
+    ENDPOINT_NAME = f"abalone-age-endpoint-{ENV}"
 
     # 1. Build & upsert pipeline definition
     pipeline, role_arn = get_pipeline(ENV, REGION)
@@ -304,14 +383,26 @@ if __name__ == "__main__":
         print(f"❌ Pipeline failed with status: {status}")
         sys.exit(1)
 
-    # 5. Deploy the latest approved model
+    # 5. Deploy the latest approved model (data capture enabled)
     print("✅ Pipeline succeeded — deploying model...")
     deploy_latest_model(
         env=ENV,
         region=REGION,
-        endpoint_name=f"abalone-age-endpoint-{ENV}",
+        endpoint_name=ENDPOINT_NAME,
         role_arn=role_arn,
+        bucket=BUCKET,
         model_group="AbaloneModelPackageGroup",
+    )
+
+    # 6. Set up model monitoring — baseline + hourly drift schedule
+    print("Setting up model monitoring...")
+    setup_model_monitoring(
+        env=ENV,
+        region=REGION,
+        endpoint_name=ENDPOINT_NAME,
+        role_arn=role_arn,
+        bucket=BUCKET,
+        baseline_data_uri=f"s3://{BUCKET}/{DATA_KEY}",  # training data as baseline
     )
 
     sys.exit(0)
