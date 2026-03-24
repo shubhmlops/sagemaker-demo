@@ -34,10 +34,10 @@ Here it's framed as **3-class classification** on age group — works with the p
 
 ```
 data.csv             → Abalone dataset (4177 rows, ready to upload to S3)
-1_preprocessing.py   → cleans data, normalises features, splits train/val/test
-2_training.py        → trains a Random Forest classifier, saves model artifact
-3_evaluation.py      → scores model on test set, writes evaluation.json
-4_pipeline.py        → wires everything into a SageMaker Pipeline
+preprocessing.py   → cleans data, normalises features, splits train/val/test
+training.py        → trains a Random Forest classifier, saves model artifact
+evaluation.py      → scores model on test set, writes evaluation.json
+pipeline.py        → wires everything into a SageMaker Pipeline
 ```
 
 ## Pipeline Flow
@@ -58,7 +58,7 @@ pip install sagemaker scikit-learn boto3
 aws s3 cp data.csv s3://<your-bucket>/sm-pipeline-demo/data/data.csv
 
 # Run the pipeline
-python 4_pipeline.py
+python pipeline.py
 ```
 
 ## What each SageMaker concept does
@@ -74,7 +74,7 @@ python 4_pipeline.py
 ## Extending for Claude Code demo
 
 Later you can drop Claude Code in to:
-- Auto-generate feature engineering logic in `1_preprocessing.py`
-- Suggest better hyperparameters in `4_pipeline.py`
+- Auto-generate feature engineering logic in `preprocessing.py`
+- Suggest better hyperparameters in `pipeline.py`
 - Explain what each ring count means biologically and why it maps to age
 - Explain any step in plain English
