@@ -1,11 +1,11 @@
 version: 0.2
 
-env:
-  variables:
-    PIPELINE_NAME: "MyMLPipeline"
-    INPUT_DATA_KEY: "blend-sagemaker-demo/data/data.csv"
-    ACCURACY_THRESHOLD: "0.80"
-    MODEL_APPROVAL_STATUS: "PendingManualApproval"
+# env:
+#   variables:
+#     PIPELINE_NAME: "MyMLPipeline"
+#     #INPUT_DATA_KEY: "blend-sagemaker-demo/data/data.csv"
+#     ACCURACY_THRESHOLD: "0.80"
+#     MODEL_APPROVAL_STATUS: "PendingManualApproval"
 
 phases:
 
