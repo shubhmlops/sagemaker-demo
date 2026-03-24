@@ -17,23 +17,21 @@ phases:
       - pip install --upgrade pip
       - pip install --no-cache-dir awscli sagemaker==2.224.0 scikit-learn==1.2.2 boto3 pandas
 
-  pre_build:
-    commands:
-      - echo "==> Validating environment..."
+  # pre_build:
+  #   commands:
+  #     - echo "==> Validating environment..."
 
-      - '[ -z "$SAGEMAKER_ROLE_ARN" ] && echo "ERROR: SAGEMAKER_ROLE_ARN is not set" && exit 1 || true'
-      - '[ -z "$S3_BUCKET" ] && echo "ERROR: S3_BUCKET is not set" && exit 1 || true'
+  #     - '[ -z "$SAGEMAKER_ROLE_ARN" ] && echo "ERROR: SAGEMAKER_ROLE_ARN is not set" && exit 1 || true'
+  #     - '[ -z "$S3_BUCKET" ] && echo "ERROR: S3_BUCKET is not set" && exit 1 || true'
 
-      - echo "Pipeline name  : $PIPELINE_NAME"
-      - echo "S3 bucket      : $S3_BUCKET"
-      - echo "Region         : $AWS_DEFAULT_REGION"
+  #     - echo "Pipeline name  : $PIPELINE_NAME"
+  #     - echo "S3 bucket      : $S3_BUCKET"
+  #     - echo "Region         : $AWS_DEFAULT_REGION"
 
   build:
     commands:
-      - echo "==> Uploading data.csv to S3..."
-      - '[ -f data.csv ] && aws s3 cp data.csv s3://$S3_BUCKET/$INPUT_DATA_KEY || echo "WARNING: data.csv not found, skipping upload"'
-
-      - echo "==> Running pipeline script..."
+      - echo "Starting SageMaker pipeline..."
+      - ls -R sagemaker-demo/
       - python pipeline.py
 
   post_build:
