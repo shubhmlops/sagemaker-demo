@@ -100,8 +100,10 @@ def deploy_latest_model(env: str, region: str, endpoint_name: str, role_arn: str
         Containers=[{
             "ModelPackageName": model_package_arn,
             "Environment": {
-                # Tells the SKLearn container which script has model_fn / predict_fn
+                # Script to load for inference — must exist inside model.tar.gz under code/
                 "SAGEMAKER_PROGRAM": "training.py",
+                # Where the container looks for the script after extracting model.tar.gz
+                "SAGEMAKER_SUBMIT_DIRECTORY":  "/opt/ml/model/code",
             },
         }],
         ExecutionRoleArn=role_arn,
