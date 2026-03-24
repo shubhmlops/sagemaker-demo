@@ -31,7 +31,6 @@ phases:
   build:
     commands:
       - echo "Starting SageMaker pipeline..."
-      - ls -R sagemaker-demo/
       - python pipeline.py
 
   post_build:
