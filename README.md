@@ -55,7 +55,7 @@ pipeline.py        → wires everything into a SageMaker Pipeline
 pip install sagemaker scikit-learn boto3
 
 # Upload the sample data to S3:
-aws s3 cp data.csv s3://<your-bucket>/sm-pipeline-demo/data/data.csv
+aws s3 cp data.csv s3://<your-bucket>/data/data.csv
 
 # Run the pipeline
 python pipeline.py
