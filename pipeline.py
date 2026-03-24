@@ -93,6 +93,11 @@ def deploy_latest_model(env: str, region: str, endpoint_name: str, role_arn: str
         role=role_arn,
         model_package_arn=model_package_arn,
         sagemaker_session=session,
+        env={
+            # Tells the SKLearn container which script contains model_fn / predict_fn.
+            # training.py is bundled inside model.tar.gz under code/ by the training job.
+            "SAGEMAKER_PROGRAM": "training.py",
+        },
     )
 
     exists = endpoint_exists(endpoint_name, region)

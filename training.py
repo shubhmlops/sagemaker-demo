@@ -67,3 +67,25 @@ print(f"Validation accuracy: {val_accuracy:.4f}")
 model_path = os.path.join(MODEL_DIR, "model.joblib")
 joblib.dump(model, model_path)
 print(f"Model saved → {model_path}  ✓")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inference handlers  (used by SageMaker when this script is the serving entry point)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def model_fn(model_dir):
+    """Load the model from disk — called once when the container starts."""
+    return joblib.load(os.path.join(model_dir, "model.joblib"))
+
+
+def input_fn(request_body, content_type):
+    """Deserialise the incoming request into a DataFrame."""
+    if content_type == "text/csv":
+        import io
+        return pd.read_csv(io.StringIO(request_body), header=None)
+    raise ValueError(f"Unsupported content type: {content_type}")
+
+
+def predict_fn(input_data, model):
+    """Run inference and return predictions."""
+    return model.predict(input_data)
