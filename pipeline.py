@@ -38,7 +38,7 @@ from sagemaker.sklearn.processing import SKLearnProcessor
 from sagemaker.sklearn.estimator import SKLearn
 from sagemaker.processing import ProcessingInput, ProcessingOutput
 from sagemaker.model_metrics import MetricsSource, ModelMetrics
-from sagemaker.model_monitor import DefaultModelMonitor, DataCaptureConfig
+from sagemaker.model_monitor import DefaultModelMonitor
 from sagemaker.model_monitor.dataset_format import DatasetFormat
 import sagemaker.inputs
 
@@ -81,51 +81,73 @@ def deploy_latest_model(env: str, region: str, endpoint_name: str, role_arn: str
                          bucket: str, model_group: str = "AbaloneModelPackageGroup"):
     """Deploy (or update) the latest approved model to a real-time endpoint.
 
+    Uses boto3 directly instead of model.deploy() to reliably handle both the
+    create (first run) and update (subsequent runs) cases without SDK bugs.
     Data capture is enabled so all inference inputs/outputs are saved to S3.
-    These captured requests feed the model monitoring schedule.
     """
-    session = Session(boto3.Session(region_name=region))
+    sm = boto3.client("sagemaker", region_name=region)
     model_package_arn = get_latest_approved_model_package(model_group, region)
-
     print(f"Deploying model package: {model_package_arn}")
 
-    model = ModelPackage(
-        role=role_arn,
-        model_package_arn=model_package_arn,
-        sagemaker_session=session,
-        env={
-            # Tells the SKLearn container which script contains model_fn / predict_fn.
-            # training.py is bundled inside model.tar.gz under code/ by the training job.
-            "SAGEMAKER_PROGRAM": "training.py",
+    # Unique names per run avoid config name collisions across deployments
+    ts          = int(time.time())
+    model_name  = f"abalone-model-{env}-{ts}"
+    config_name = f"abalone-config-{env}-{ts}"
+
+    # 1. Create a SageMaker Model object from the registered model package
+    sm.create_model(
+        ModelName=model_name,
+        Containers=[{
+            "ModelPackageName": model_package_arn,
+            "Environment": {
+                # Tells the SKLearn container which script has model_fn / predict_fn
+                "SAGEMAKER_PROGRAM": "training.py",
+            },
+        }],
+        ExecutionRoleArn=role_arn,
+    )
+    print(f"Created model: {model_name}")
+
+    # 2. Create endpoint config with data capture ON
+    sm.create_endpoint_config(
+        EndpointConfigName=config_name,
+        ProductionVariants=[{
+            "VariantName":            "AllTraffic",
+            "ModelName":              model_name,
+            "InstanceType":           "ml.m5.large",
+            "InitialInstanceCount":   1,
+            "InitialVariantWeight":   1,
+        }],
+        DataCaptureConfig={
+            "EnableCapture":               True,
+            "InitialSamplingPercentage":   100,
+            "DestinationS3Uri":            f"s3://{bucket}/monitoring/data-capture/{endpoint_name}",
+            "CaptureOptions":              [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
         },
     )
+    print(f"Created endpoint config: {config_name}")
 
+    # 3. Create or update the endpoint depending on whether it already exists
     exists = endpoint_exists(endpoint_name, region)
-    print(f"Endpoint '{endpoint_name}' already exists: {exists}")
+    if exists:
+        print(f"Endpoint exists — updating: {endpoint_name}")
+        sm.update_endpoint(
+            EndpointName=endpoint_name,
+            EndpointConfigName=config_name,
+        )
+    else:
+        print(f"Creating new endpoint: {endpoint_name}")
+        sm.create_endpoint(
+            EndpointName=endpoint_name,
+            EndpointConfigName=config_name,
+        )
 
-    # Delete stale endpoint config if it exists — SageMaker keeps configs around
-    # even after an endpoint is deleted, which blocks CreateEndpointConfig on redeploy.
-    sm = boto3.client("sagemaker", region_name=region)
-    try:
-        sm.delete_endpoint_config(EndpointConfigName=endpoint_name)
-        print(f"Deleted stale endpoint config: {endpoint_name}")
-    except sm.exceptions.ClientError as e:
-        if "Could not find" not in str(e) and "does not exist" not in str(e):
-            raise
-
-    # Capture 100% of requests/responses → stored in S3 for drift monitoring
-    data_capture_config = DataCaptureConfig(
-        enable_capture=True,
-        sampling_percentage=100,
-        destination_s3_uri=f"s3://{bucket}/monitoring/data-capture/{endpoint_name}",
-    )
-
-    model.deploy(
-        endpoint_name=endpoint_name,
-        instance_type="ml.m5.large",
-        initial_instance_count=1,
-        update_endpoint=exists,
-        data_capture_config=data_capture_config,
+    # 4. Wait until the endpoint is fully in service
+    print("Waiting for endpoint to be InService...")
+    waiter = sm.get_waiter("endpoint_in_service")
+    waiter.wait(
+        EndpointName=endpoint_name,
+        WaiterConfig={"Delay": 30, "MaxAttempts": 60},   # wait up to 30 min
     )
     print(f"✅ Endpoint ready: {endpoint_name}")
 
