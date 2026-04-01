@@ -14,14 +14,24 @@ phases:
 
   build:
     commands:
-      # - |
-      #   if [ -f "data.csv" ]; then
-      #     echo "==> data.csv found, uploading to S3..."
-      #     aws s3 cp data.csv s3://${S3_BUCKET}/${INPUT_DATA_KEY:-data/data.csv}
-      #     echo "==> Upload complete."
-      #   else
-      #     echo "==> data.csv not found, skipping upload."
-      #   fi
+      # - echo "Checking if data exists in S3..."
+
+      #     - |
+      #       if aws s3 ls s3://${S3_BUCKET}/${INPUT_DATA_KEY:-data/data.csv}; then
+      #         echo "==> Data already exists in S3. Skipping upload."
+      #       else
+      #         echo "==> Data not found in S3."
+              
+      #         if [ -f "data.csv" ]; then
+      #           echo "==> Uploading local data.csv to S3..."
+      #           aws s3 cp data.csv s3://${S3_BUCKET}/${INPUT_DATA_KEY:-data/data.csv}
+      #           echo "==> Upload complete."
+      #         else
+      #           echo "❌ ERROR: data.csv not found locally or in S3"
+      #           exit 1
+      #         fi
+      #       fi
+
       - echo "Starting SageMaker pipeline..."
       - python pipeline.py
 
