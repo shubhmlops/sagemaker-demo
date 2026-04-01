@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+
 """
 pipeline.py
 -------------
