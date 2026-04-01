@@ -56,4 +56,13 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 #ENTRYPOINT ["python3.13"]
+#ENTRYPOINT ["/opt/venv/bin/python3"]
+
+# Allow SageMaker to choose which script to run
+# DEFAULT is empty → SageMaker must pass it during training/inference
 ENV SAGEMAKER_PROGRAM=""
+
+#ENV SAGEMAKER_PROGRAM vyepti_feature_model_training.py
+
+# Default command (toolkit handles this)
+CMD ["train"]

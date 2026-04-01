@@ -1,3 +1,7 @@
+# Step Functions 
+
+Serverless service that allows you to build and manage workflows for Distributed applications, automate processes, orchestrate microservices and create data and ml pipelines.
+
 # SageMaker ML Pipeline — AWS Step Functions
 
 A production-grade ML pipeline that automates preprocessing → training → evaluation → deployment using AWS Step Functions + SageMaker.
