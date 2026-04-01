@@ -5,6 +5,24 @@ Each file is intentionally short and heavily commented.
 
 ## Dataset — Abalone (UCI Benchmark)
 
+📌 What is the Abalone Dataset?
+
+The Abalone dataset is a classic dataset used in machine learning.
+
+👉 Goal:
+
+Predict the age of an abalone (a type of sea snail)
+
+👉 Why is it tricky?
+
+You can’t directly measure age easily.
+Instead, scientists:
+
+Cut the shell
+
+Count the number of rings
+
+
 `data.csv` — 4,177 rows, 9 features, multi-class classification problem.
 
 | Column | Type | Description |
