@@ -3,7 +3,7 @@
 A minimal end-to-end ML pipeline for team demos using the **Abalone dataset**.  
 Each file is intentionally short and heavily commented.
 
-## Dataset — Abalone (UCI Benchmark)
+## Dataset — Abalone
 
 📌 What is the Abalone Dataset?
 
@@ -67,7 +67,7 @@ pipeline.py        → wires everything into a SageMaker Pipeline
                                                    No  ──► (skip)
 ```
 
-## Quick Start
+## Quick Start - Local
 
 ```bash
 pip install sagemaker scikit-learn boto3
@@ -77,6 +77,13 @@ aws s3 cp data.csv s3://<your-bucket>/data/data.csv
 
 # Run the pipeline
 python pipeline.py
+```
+
+## SageMaker
+```
+Run Codepipeline with Latest
+BuildSpec will run the Pipeline.py and it will call the Sagemaker execution.
+Check the Execution in SageMaker Studio - Pipelines Section
 ```
 
 ## What each SageMaker concept does
@@ -89,7 +96,7 @@ python pipeline.py
 | `RegisterModel` | Add the model to the SageMaker Model Registry for deployment |
 | `ParameterString/Float` | Pipeline-level inputs you can override per execution |
 
-## Extending for Claude Code demo
+## Extending for Claude Code
 
 Later you can drop Claude Code in to:
 - Auto-generate feature engineering logic in `preprocessing.py`
