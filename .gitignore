@@ -12,6 +12,7 @@ build/
 .venv/
 venv/
 env/
+dvc-env/
 
 # Environment variables / secrets
 .env
